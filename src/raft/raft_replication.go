@@ -3,9 +3,9 @@ package raft
 import "time"
 
 type LogEntry struct {
-	Term         int         // the log entry's term
-	CommandValid bool        // if it should be applied
-	Command      interface{} // the command should be applied to the state machine
+	Term         int         // 该日志条目的任期
+	CommandValid bool        // 是否有效
+	Command      interface{} // 应用于状态机的命令
 }
 
 type AppendEntriesArgs struct {
@@ -23,7 +23,7 @@ type AppendEntriesReply struct {
 	Success bool
 }
 
-// Peer's callback
+// Peer 的回调函数
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -31,7 +31,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Term = rf.currentTerm
 	reply.Success = false
 
-	// align the term
+	// 对齐任期
 	if args.Term < rf.currentTerm {
 		LOG(rf.me, rf.currentTerm, DLog2, "Reject log, Higher term, T%d<T%d", args.LeaderId, args.Term, rf.currentTerm)
 		return
@@ -40,7 +40,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.becomeFollwerLocked(args.Term)
 	}
 
-	// return failure if prevLog not matched
+	// 如果 prevLog 不匹配，则返回
 	if args.PrevLogIndex > len(rf.log) {
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log too short, Len: %d < Prev: %d", args.LeaderId, len(rf.log), args.PrevLogIndex)
 		return
@@ -50,12 +50,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		return
 	}
 
-	// append the leader log entries to local
+	// 将领导者日志条目添加到本地
 	rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...)
 	reply.Success = true
 	LOG(rf.me, rf.currentTerm, DLog2, "Follower accept logs: (%d, %d]", args.PrevLogIndex, args.PrevLogIndex+len(args.Entries))
 
-	// TODO: handle LeaderCommit
+	// TODO:  处理领导 Commit
 
 	rf.resetElectionTimerLocked()
 }
@@ -77,14 +77,14 @@ func (rf *Raft) startReplication(term int) bool {
 			return
 		}
 
-		// align the term
+		// 对齐任期
 		if reply.Term > rf.currentTerm {
 			rf.becomeFollwerLocked(reply.Term)
 			return
 		}
 
-		// handle the reply
-		// probe the lower index if the prevLog not matched
+		// 处理 rpc 返回值
+		// 如果 prevLog 不匹配，则回撤
 		if !reply.Success {
 			// go back a term
 			idx, term := args.PrevLogIndex, args.PrevLogTerm
@@ -96,11 +96,11 @@ func (rf *Raft) startReplication(term int) bool {
 			return
 		}
 
-		// update match/next index if log appended successfully
+		// 如果日志添加成功，更新/匹配下一个索引
 		rf.matchIndex[peer] = args.PrevLogIndex + len(args.Entries)	// important
 		rf.nextIndex[peer] = rf.matchIndex[peer] + 1
 
-		// TODO: update the commitIndex
+		// TODO: 更新 Commit 索引
 	}
 
 	rf.mu.Lock()
