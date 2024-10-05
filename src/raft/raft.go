@@ -66,25 +66,32 @@ type ApplyMsg struct {
 // A Go object implementing a single Raft peer.
 type Raft struct {
 	mu        sync.Mutex          // Lock to protect shared access to this peer's state
-	peers     []*labrpc.ClientEnd // RPC end points of all peers
+	peers     []*labrpc.ClientEnd // 所有 peer 的集合
 	persister *Persister          // Object to hold this peer's persisted state
-	me        int                 // this peer's index into peers[]
+	me        int                 // 该 peer 在所有 peer 中的位置索引
 	dead      int32               // set by Kill()
 
 	// Your data here (3A, 3B, 3C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	// Raft 服务器必须保持的状态
 	role        Role
 	currentTerm int
 	votedFor    int // -1 means vote for none
 
-	// log in the peer's local
+	// peer 的本地日志
 	log []LogEntry
 
-	// only used in Leader
-	// every peer's view
+	// 仅用于领导者
+	// 每个 peer 的视图
 	nextIndex  []int
 	matchIndex []int
+
+	// 应用于 apply loop 的字段
+	commitIndex int
+	lastApplied int
+	applyCh     chan ApplyMsg
+	applyCond   *sync.Cond
 
 	electionStart   time.Time
 	electionTimeout time.Duration // random
@@ -130,8 +137,8 @@ func (rf *Raft) becomeLeaderLocked() {
 	}
 }
 
-// return currentTerm and whether this server
-// believes it is the leader.
+// 返回 currentTerm 以及该服务器是否
+// 是否认为自己是领导者。
 func (rf *Raft) GetState() (int, bool) {
 	// // Your code here (3A).
 	rf.mu.Lock()
@@ -252,18 +259,23 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentTerm = 0
 	rf.votedFor = -1
 
-	// a dummy entry to avoid lots of corner check
+	// 假入口，以避免大量的边界检查
 	rf.log = append(rf.log, LogEntry{})
 
-	// initialize the leader's view slice
+	// 初始化领导者的视图 slice
 	rf.nextIndex = make([]int, len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers))
+
+	// 初始化用于 apply 的字段
+	rf.applyCh = applyCh
+	rf.applyCond = sync.NewCond(&rf.mu)
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// start ticker goroutine to start elections
+	// 启动 goroutine 以开始选举
 	go rf.electionTicker()
+	go rf.applicationTicker()
 
 	return rf
 }
