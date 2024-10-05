@@ -15,12 +15,27 @@ func (rf *Raft) isElectionTimeoutLocked() bool {
 	return time.Since(rf.electionStart) > rf.electionTimeout
 }
 
+// 检查我的日志是否比候选者的日志更新
+func (rf *Raft) isMoreUpToDateLocked(candidateIndex, candidateTerm int) bool {
+	l := len(rf.log)
+	lastIndex, lastTerm := l-1, rf.log[l-1].Term
+
+	LOG(rf.me, rf.currentTerm, DVote, "Compare last log, Me: [%d]T%d, Candidate: [%d]T%d", lastIndex, lastTerm, candidateIndex, candidateTerm)
+	if lastTerm != candidateTerm {
+		return lastTerm > candidateTerm
+	}
+	return lastIndex > candidateIndex
+}
+
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 type RequestVoteArgs struct {
 	// Your data here (3A, 3B).
 	Term        int
 	CandidateId int
+
+	LastLogIndex int
+	LastLogTerm int
 }
 
 // example RequestVote RPC reply structure.
@@ -40,7 +55,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
-	// align the term
+	// 对齐任期
 	if args.Term < rf.currentTerm {
 		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, higher term, T%d>T%d", args.CandidateId, rf.currentTerm, args.Term)
 		return
@@ -49,9 +64,15 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.becomeFollwerLocked(args.Term)
 	}
 
-	// check for voteFor
+	// 检查是否投过票
 	if rf.votedFor != -1 {
-		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject, Already voted to S%d", args.CandidateId, rf.votedFor)
+		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, Already voted to S%d", args.CandidateId, rf.votedFor)
+	}
+
+	// 检查候选人最后的日志是否为最新日志
+	if rf.isMoreUpToDateLocked(args.LastLogIndex, args.LastLogTerm) {
+		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, Candidate less up-to-date", args.CandidateId)
+		return
 	}
 
 	reply.VoteGranted = true
@@ -99,7 +120,7 @@ func (rf *Raft) startElection(term int) {
 		reply := &RequestVoteReply{}
 		ok := rf.sendRequestVote(peer, args, reply)
 
-		// handle the response
+		// 处理 rpc 返回的响应
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
 		if !ok {
@@ -107,19 +128,19 @@ func (rf *Raft) startElection(term int) {
 			return
 		}
 
-		// align term
+		// 对齐任期
 		if reply.Term > rf.currentTerm {
 			rf.becomeFollwerLocked(reply.Term)
 			return
 		}
 
-		// check the context
+		// 检查上下文
 		if rf.contextLostLocked(Candidate, term) {
 			LOG(rf.me, rf.currentTerm, DVote, "Lost context, abort RequestVoteReply for S%d", peer)
 			return
 		}
 
-		// count the votes
+		// 统计票数
 		if reply.VoteGranted {
 			votes++
 			if votes > len(rf.peers)/2 {
@@ -136,6 +157,7 @@ func (rf *Raft) startElection(term int) {
 		return
 	}
 
+	l := len(rf.log)
 	for peer := 0; peer < len(rf.peers); peer++ {
 		if peer == rf.me {
 			votes++
@@ -145,6 +167,8 @@ func (rf *Raft) startElection(term int) {
 		args := &RequestVoteArgs{
 			Term:        rf.currentTerm,
 			CandidateId: rf.me,
+			LastLogIndex: l-1,
+			LastLogTerm: rf.log[l-1].Term,
 		}
 
 		go askVoteFromPeer(peer, args)
@@ -156,7 +180,7 @@ func (rf *Raft) electionTicker() {
 	for !rf.killed() {
 
 		// Your code here (3A)
-		// Check if a leader election should be started.
+		// 检查是否应启动领导人选举
 		rf.mu.Lock()
 		if rf.role != Leader && rf.isElectionTimeoutLocked() {
 			rf.becomeCandidateLocked()
