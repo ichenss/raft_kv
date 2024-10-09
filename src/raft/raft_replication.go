@@ -85,7 +85,7 @@ func (rf *Raft) getMajorityIndexLocked() int {
 	return tmpIndexes[majorityIdx]
 }
 
-// only valid in the given `term`
+// 仅在给定的 term 中有效
 func (rf *Raft) startReplication(term int) bool {
 	replicateToPeer := func(peer int, args *AppendEntriesArgs) {
 		reply := &AppendEntriesReply{}
