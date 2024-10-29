@@ -27,6 +27,9 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+
+	ConfilictIndex int
+	ConfilictTerm  int
 }
 
 // Peer 的回调函数
@@ -48,16 +51,21 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// 如果 prevLog 不匹配，则返回
 	if args.PrevLogIndex >= len(rf.log) {
+		reply.ConfilictIndex = len(rf.log)
+		reply.ConfilictTerm = InvalidTerm
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log too short, Len: %d < Prev: %d", args.LeaderId, len(rf.log), args.PrevLogIndex)
 		return
 	}
 	if rf.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		reply.ConfilictTerm = rf.log[args.PrevLogIndex].Term
+		reply.ConfilictIndex = rf.firstLogFor(reply.ConfilictTerm)
 		LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Reject log, Follower log, Prev log not match, [%d]: T%d != T%d", args.LeaderId, args.PrevLogIndex, rf.log[args.PrevLogIndex].Term, args.PrevLogTerm)
 		return
 	}
 
 	// 将领导者日志条目添加到本地
 	rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...)
+	rf.persistLocked()
 	reply.Success = true
 	LOG(rf.me, rf.currentTerm, DLog2, "Follower accept logs: (%d, %d]", args.PrevLogIndex, args.PrevLogIndex+len(args.Entries))
 
