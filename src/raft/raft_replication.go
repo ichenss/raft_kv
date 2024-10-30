@@ -6,30 +6,30 @@ import (
 )
 
 type LogEntry struct {
-	Term         int         // 该日志条目的任期
-	CommandValid bool        // 是否有效
-	Command      interface{} // 应用于状态机的命令
+	Term         int         // 日志条目的任期号
+	CommandValid bool        // 命令是否有效
+	Command      interface{} // 实际命令内容
 }
 
 type AppendEntriesArgs struct {
-	Term     int
-	LeaderId int
+	Term     int	// 领导者的任期
+	LeaderId int	// 领导者ID
 
 	// 用于探测匹配点
-	PrevLogIndex int
-	PrevLogTerm  int
-	Entries      []LogEntry
+	PrevLogIndex int		// 前一个日志条目的索引
+	PrevLogTerm  int		// 前一个日志条目的任期
+	Entries      []LogEntry	// 需要追加的日志条目
 
 	// 用于更新追随者的 commitIndex
-	LeaderCommit int
+	LeaderCommit int	// 领导者的 commitIndex
 }
 
 type AppendEntriesReply struct {
-	Term    int
-	Success bool
+	Term    int		// 当前任期
+	Success bool	// 是否成功
 
-	ConfilictIndex int
-	ConfilictTerm  int
+	ConfilictIndex int	// 冲突的索引
+	ConfilictTerm  int	// 冲突的任期
 }
 
 // Peer 的回调函数
@@ -119,7 +119,7 @@ func (rf *Raft) startReplication(term int) bool {
 		}
 
 		// 处理 rpc 返回值
-		// 如果 prevLog 不匹配，则回撤
+		// 如果日志不匹配，回退nextIndex
 		if !reply.Success {
 			// go back a term
 			idx, term := args.PrevLogIndex, args.PrevLogTerm
