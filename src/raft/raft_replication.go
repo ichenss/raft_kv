@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"sort"
 	"time"
 )
@@ -24,6 +25,12 @@ type AppendEntriesArgs struct {
 	LeaderCommit int	// 领导者的 commitIndex
 }
 
+func (args *AppendEntriesArgs) String() string {
+	return fmt.Sprintf("Leader-%d, T%d, Prev: [%d]T%d, (%d, %d], CommitIdx: %d", 
+						args.LeaderId, args.Term, args.PrevLogIndex, args.PrevLogTerm,
+						args.PrevLogIndex, args.PrevLogIndex+len(args.Entries), args.LeaderCommit)
+}
+
 type AppendEntriesReply struct {
 	Term    int		// 当前任期
 	Success bool	// 是否成功
@@ -32,10 +39,15 @@ type AppendEntriesReply struct {
 	ConfilictTerm  int	// 冲突的任期
 }
 
+func (reply *AppendEntriesReply) String() string {
+	return fmt.Sprintf("T%d, Success: %v, ConflictTerm: [%d]T%d", reply.Term, reply.Success, reply.ConfilictIndex, reply.ConfilictTerm)
+}
+
 // Peer 的回调函数
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	LOG(rf.me, rf.currentTerm, DDebug, "<- S%d, Appended, Args=%v", args.LeaderId, args.String())
 
 	reply.Term = rf.currentTerm
 	reply.Success = false
@@ -48,6 +60,14 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if args.Term >= rf.currentTerm {
 		rf.becomeFollwerLocked(args.Term)
 	}
+
+	defer func() {
+		rf.resetElectionTimerLocked()
+		if !reply.Success {
+			LOG(rf.me, rf.currentTerm, DLog2, "<- S%d, Follower Conflict: [%d]T%d", args.LeaderId, reply.ConfilictIndex, reply.ConfilictTerm)
+			LOG(rf.me, rf.currentTerm, DLog, "<- S%d, Follower Log=%v", args.LeaderId, rf.logString())
+		}
+	}()
 
 	// 如果 prevLog 不匹配，则返回
 	if args.PrevLogIndex >= len(rf.log) {
@@ -75,8 +95,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.commitIndex = args.LeaderCommit
 		rf.applyCond.Signal()
 	}
-
-	rf.resetElectionTimerLocked()
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
@@ -101,10 +119,12 @@ func (rf *Raft) startReplication(term int) bool {
 
 		rf.mu.Lock()
 		defer rf.mu.Unlock()
+
 		if !ok {
 			LOG(rf.me, rf.currentTerm, DLog, "-> S%d, Lost or crashed", peer)
 			return
 		}
+		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, Append, Reply=%v", peer, reply.String())
 
 		// 对齐任期
 		if reply.Term > rf.currentTerm {
@@ -121,13 +141,22 @@ func (rf *Raft) startReplication(term int) bool {
 		// 处理 rpc 返回值
 		// 如果日志不匹配，回退nextIndex
 		if !reply.Success {
-			// go back a term
-			idx, term := args.PrevLogIndex, args.PrevLogTerm
-			for idx > 0 && rf.log[idx].Term == term {
-				idx--
+			prevIndex := rf.nextIndex[peer]
+			if reply.ConfilictTerm == InvalidTerm {
+				rf.nextIndex[peer] = reply.ConfilictIndex
+			} else {
+				firstIndex := rf.firstLogFor(reply.ConfilictTerm)
+				if firstIndex != InvalidIndex {
+					rf.nextIndex[peer] = firstIndex
+				} else {
+					rf.nextIndex[peer] = reply.ConfilictIndex
+				}
 			}
-			rf.nextIndex[peer] = idx + 1
-			LOG(rf.me, rf.currentTerm, DLog, "-> S%d, Not matched at %d, try next=%d", peer, args.PrevLogIndex, rf.nextIndex[peer])
+			// 避免乱序
+			if rf.nextIndex[peer] > prevIndex {
+				rf.nextIndex[peer] = prevIndex
+			}
+			// LOG()
 			return
 		}
 
@@ -169,9 +198,9 @@ func (rf *Raft) startReplication(term int) bool {
 			Entries:      rf.log[prevIdx+1:],
 			LeaderCommit: rf.commitIndex,
 		}
+		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, Append, Args=%v", peer, args.String())
 		go replicateToPeer(peer, args)
 	}
-
 	return true
 }
 

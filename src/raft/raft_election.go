@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -46,18 +47,27 @@ type RequestVoteReply struct {
 	VoteGranted bool
 }
 
+func (args *RequestVoteArgs) String() string {
+	return fmt.Sprintf("Candidate-%d, T%d, Last: [%d]T%d", args.CandidateId, args.Term, args.LastLogIndex, args.LastLogTerm)
+}
+
+func (reply *RequestVoteReply) String() string {
+	return fmt.Sprintf("T%d, VoteGranted: %v", reply.Term, reply.VoteGranted)
+}
+
 // example RequestVote RPC handler.
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (3A, 3B).
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	LOG(rf.me, rf.currentTerm, DDebug, "<- S%d, VoteAsked, Args: %v", args.CandidateId, args.String())
 
 	reply.Term = rf.currentTerm
 	reply.VoteGranted = false
 	// 对齐任期
 	if args.Term < rf.currentTerm {
-		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, higher term, T%d>T%d", args.CandidateId, rf.currentTerm, args.Term)
+		LOG(rf.me, rf.currentTerm, DVote, "<- S%d, Reject voted, higher term, T%d>T%d", args.CandidateId, rf.currentTerm, args.Term)
 		return
 	}
 	if args.Term > rf.currentTerm {
@@ -66,12 +76,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 
 	// 检查是否投过票
 	if rf.votedFor != -1 {
-		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, Already voted to S%d", args.CandidateId, rf.votedFor)
+		LOG(rf.me, rf.currentTerm, DVote, "<- S%d, Reject voted, Already voted to S%d", args.CandidateId, rf.votedFor)
 	}
 
 	// 检查候选人最后的日志是否为最新日志
 	if rf.isMoreUpToDateLocked(args.LastLogIndex, args.LastLogTerm) {
-		LOG(rf.me, rf.currentTerm, DVote, "-> S%d, Reject voted, Candidate less up-to-date", args.CandidateId)
+		LOG(rf.me, rf.currentTerm, DVote, "<- S%d, Reject voted, Candidate less up-to-date", args.CandidateId)
 		return
 	}
 
@@ -79,7 +89,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.votedFor = args.CandidateId
 	rf.persistLocked()
 	rf.resetElectionTimerLocked()
-	LOG(rf.me, rf.currentTerm, DVote, "-> S%d, vote granted", args.CandidateId)
+	LOG(rf.me, rf.currentTerm, DVote, "<- S%d, vote granted", args.CandidateId)
 }
 
 // example code to send a RequestVote RPC to a server.
@@ -128,6 +138,7 @@ func (rf *Raft) startElection(term int) {
 			LOG(rf.me, rf.currentTerm, DDebug, "Ask vote from S%d, Lost or error", peer)
 			return
 		}
+		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, AskVote Reply: %v", peer, reply.String())
 
 		// 对齐任期
 		if reply.Term > rf.currentTerm {
@@ -171,6 +182,7 @@ func (rf *Raft) startElection(term int) {
 			LastLogIndex: l-1,
 			LastLogTerm: rf.log[l-1].Term,
 		}
+		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, AskVote, Args: %v", peer, args.String())
 
 		go askVoteFromPeer(peer, args)
 	}

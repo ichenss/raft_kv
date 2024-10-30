@@ -44,16 +44,19 @@ func (rf *Raft) readPersist(data []byte) {
 	d := labgob.NewDecoder(r)
 	if err := d.Decode(&currentTerm); err != nil {
 		LOG(rf.me, rf.currentTerm, DPersist, "Read currentTerm error: %v", err)
+		return
 	}
 	rf.currentTerm = currentTerm
 
 	if err := d.Decode(&votedFor); err != nil {
 		LOG(rf.me, rf.currentTerm, DPersist, "Read votedFor error: %v", err)
+		return
 	}
 	rf.votedFor = votedFor
 
 	if err := d.Decode(&log); err != nil {
 		LOG(rf.me, rf.currentTerm, DPersist, "Read log error: %v", err)
+		return
 	}
 	rf.log = log
 
