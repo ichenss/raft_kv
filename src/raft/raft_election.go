@@ -36,7 +36,7 @@ type RequestVoteArgs struct {
 	CandidateId int
 
 	LastLogIndex int
-	LastLogTerm int
+	LastLogTerm  int
 }
 
 // example RequestVote RPC reply structure.
@@ -177,10 +177,10 @@ func (rf *Raft) startElection(term int) {
 		}
 
 		args := &RequestVoteArgs{
-			Term:        rf.currentTerm,
-			CandidateId: rf.me,
-			LastLogIndex: l-1,
-			LastLogTerm: rf.log[l-1].Term,
+			Term:         rf.currentTerm,
+			CandidateId:  rf.me,
+			LastLogIndex: l - 1,
+			LastLogTerm:  rf.log[l-1].Term,
 		}
 		LOG(rf.me, rf.currentTerm, DDebug, "-> S%d, AskVote, Args: %v", peer, args.String())
 
